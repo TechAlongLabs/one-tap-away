@@ -1,44 +1,94 @@
-# one-tap-away
+# One Tap Away (Cloud Run, Single Service)
 
-Save this Dockerfile in the same directory as your app.py and requirements.txt.
+This project serves both:
 
-docker build -t flask-hello-world .
+- React frontend (built in Docker, served from Flask static files)
+- Flask backend API (`/chat`, `/chat_with_semantic_search`, `/health`)
 
-docker run -p 8080:8080 flask-hello-world
+## Local Build and Run
 
-Open your browser and go to http://127.0.0.1:5000/ to see "Hello, World!".
+Build image:
 
-Make sure you have gcloud
+```bash
+docker build -t one-tap-away:local .
+```
 
+Run container locally:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e PORT=8080 \
+  -e GEMINI_API_KEY="YOUR_KEY_HERE" \
+  one-tap-away:local
+```
+
+Open:
+
+- `http://127.0.0.1:8080/` (frontend)
+- `http://127.0.0.1:8080/health` (health)
+
+## GCP Setup
+
+Set project:
+
+```bash
 gcloud config set project our-lacing-496620-t5
+```
 
-gcloud services enable run.googleapis.com artifactregistry.goog
-leapis.com
+Enable required services:
 
-if not logged in: gcloud auth login
+```bash
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
+```
 
+Authenticate if needed:
+
+```bash
+gcloud auth login
 gcloud auth configure-docker northamerica-northeast1-docker.pkg.dev
+```
 
-and then we build and push
+## Secret Manager
 
-# MAC Build and Push
+Create secret one time:
 
-docker buildx build --platform linux/amd64 -t northamerica-northeast1-docker.pkg.dev/our-lacing-496620-t5/my-repo/flask-app:latest .
+```bash
+printf '%s' 'YOUR_REAL_GEMINI_API_KEY' | \
+gcloud secrets create ota-gemini-api-key --data-file=-
+```
 
+If secret already exists, add a new version:
 
-docker push northamerica-northeast1-docker.pkg.dev/our-lacing-496620-t5/my-repo/flask-app:latest
+```bash
+printf '%s' 'YOUR_REAL_GEMINI_API_KEY' | \
+gcloud secrets versions add ota-gemini-api-key --data-file=-
+```
 
+## Build and Push Image
 
-gcloud run deploy flask-app \
-  --image northamerica-northeast1-docker.pkg.dev/our-lacing-496620-t5/my-repo/flask-app:latest \
+```bash
+docker buildx build --platform linux/amd64 \
+  -t northamerica-northeast1-docker.pkg.dev/our-lacing-496620-t5/my-repo/one-tap-away:latest \
+  .
+
+docker push northamerica-northeast1-docker.pkg.dev/our-lacing-496620-t5/my-repo/one-tap-away:latest
+```
+
+## Deploy to Cloud Run
+
+```bash
+gcloud run deploy one-tap-away \
+  --image northamerica-northeast1-docker.pkg.dev/our-lacing-496620-t5/my-repo/one-tap-away:latest \
   --platform managed \
   --region northamerica-northeast1 \
   --allow-unauthenticated \
-  --port 8080
+  --port 8080 \
+  --set-secrets GEMINI_API_KEY=ota-gemini-api-key:latest \
+  --timeout 300
+```
 
+## Notes
 
-# WINDOWS
-n/a
-
-# Visit the URL
-Service URL: https://flask-app-890590900340.northamerica-northeast1.run.app
+- The app attempts to refresh Google Sheets data at startup.
+- If refresh fails, startup continues using bundled `artifacts/spreadsheet_data.json`.
+- Do not commit real `.env` secrets. Use Secret Manager for production.

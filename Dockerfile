@@ -1,23 +1,27 @@
-# Use the official Python image as the base image
-FROM python:3.9-slim
+FROM node:20-alpine AS frontend-builder
 
-# Set the working directory in the container
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY frontend/ ./
+RUN npm run build
+
+FROM python:3.11-slim
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 WORKDIR /app
 
-# Copy the requirements.txt file into the container
-COPY requirements.txt .
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
 
-# Install the dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py ./
+COPY src ./src
+COPY artifacts ./artifacts
+COPY .env.example ./.env.example
+COPY --from=frontend-builder /app/dist ./dist
 
-# Copy the rest of the application code into the container
-COPY . .
-
-# Use the PORT environment variable set by Cloud Run
 ENV PORT=8080
-
-# Expose the port for Cloud Run
 EXPOSE 8080
 
-# Command to run the application
-CMD ["python", "app.py"]
+CMD ["sh", "-c", "uv run gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 300 app:app"]
